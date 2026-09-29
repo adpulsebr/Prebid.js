@@ -2,6 +2,44 @@
 
 This file contains instructions for the Codex agent and its friends when working on tasks in this repository.
 
+## Quick Reference
+- **Install:** `npm install`
+- **Lint:** `npx eslint --cache --cache-strategy content [files]`
+- **Test (single file):** `npx gulp test --nolint --file test/spec/modules/<name>_spec.js`
+- **Test (full):** `npx gulp test` (can take 15+ minutes — use sparingly)
+- **Manual test:** `gulp review-start` (opens coverage + integration examples)
+- **Node.js:** >=20 required
+- **Package Manager:** npm
+
+## Module Architecture
+```
+src/
+├── adapters/        — Bidder adapters (RUBICON, APPNEXUS, etc.)
+├── modules/         — Core modules (consent, userId, analytics, etc.)
+├── analytics/       — Analytics adapters
+├── userId/          — User ID submodules
+├── utils/           — Shared utilities
+└── prebid.js        — Entry point (exports `adppbjs` global)
+```
+
+**Global var:** This is an AdPulse fork — use `adppbjs`, NOT `pbjs`.
+
+## Custom Adapter Pattern
+```javascript
+import { registerBidder } from '../src/adapters/bidderFactory.js';
+const BIDDER_CODE = 'yourBidder';
+export const spec = {
+  code: BIDDER_CODE,
+  isBidRequestValid(bid) { /* validate */ },
+  buildRequests(validBidRequests, bidderRequest) { /* build */ },
+  interpretResponse(serverResponse, bidRequest) { /* parse */ },
+  getUserSyncs(syncOptions, serverResponses) { /* sync */ },
+  onTimeout(timeoutData) { /* handle */ },
+  onBidWon(bid) { /* track */ }
+};
+registerBidder(spec);
+```
+
 ## Programmatic checks
 - if you don't have an eslint cache, establish one early with `npx eslint --cache --cache-strategy content`. eslint can easily take two minutes to run.
 - Before committing code changes, run lint and run tests on the files you have changed. Successful linting has no output.

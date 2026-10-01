@@ -13,16 +13,25 @@ This file contains instructions for the Codex agent and its friends when working
 
 ## Module Architecture
 ```
-src/
-├── adapters/        — Bidder adapters (RUBICON, APPNEXUS, etc.)
-├── modules/         — Core modules (consent, userId, analytics, etc.)
-├── analytics/       — Analytics adapters
-├── userId/          — User ID submodules
-├── utils/           — Shared utilities
-└── prebid.js        — Entry point (exports `adppbjs` global)
+src/                — Core (TypeScript/JS): prebid.ts (entry), adapterManager.ts, auction.ts, config.ts, targeting.ts, userSync.ts
+src/adapters/       — bidderFactory.ts (registerBidder helper only; no bidders live here)
+modules/            — Bid adapters (*BidAdapter.js), analytics (*AnalyticsAdapter.js), ID systems (*IdSystem.js), other modules
+libraries/          — Shared helper libraries used by modules
+modules-*.json      — Module lists for AdPulse bundles (see "AdPulse bundles")
+test/spec/modules/  — Unit specs per module
 ```
 
-**Global var:** This is an AdPulse fork — use `adppbjs`, NOT `pbjs`.
+**Global var:** This is an AdPulse fork — use `adppbjs`, NOT `pbjs` (`globalVarName` in `package.json`; webpack chunk global is `adppbjsChunk`).
+
+## AdPulse bundles
+`.github/workflows/deploy-to-production.yml` (push to `main` touching `src/**`, `modules/**`, `gulpfile.js`, `package.json`) runs `gulp build` then `gulp bundle --tag <tag> --modules=<file>`, uploads to S3 and purges Cloudflare:
+| Module list | Bundle | Public URL |
+|---|---|---|
+| `modules-full.json` | `prebid-full` | `tag.adpulse.com.br/prebid.js` (the one adp-publisher-tag loads) |
+| `modules-no-user-sync.json` | `prebid-no-user-sync` | `tag.adpulse.com.br/prebid-no-user-sync.js` |
+| `modules-adzep.json` | `prebid-adzep` | `tag.adpulse.com.br/prebid-adzep.js` |
+
+Bidders currently bundled: `onetagBidAdapter`, `rubiconBidAdapter`, `seedtagBidAdapter` (+ `userId`, `sharedIdSystem`, `criteoIdSystem`, `id5IdSystem`, `identityLinkIdSystem` in full/adzep). Adding a bidder to the production bundle means editing the relevant `modules-*.json`; a change to `modules-*.json` alone does not trigger the deploy workflow (path filter). Deploy notifies Discord via `adpulsebr/shared`.
 
 ## Custom Adapter Pattern
 ```javascript
@@ -89,12 +98,34 @@ registerBidder(spec);
 
 ## Agent Role
 
-This repository is assigned to the **Frontend Sub-Agent (Role C)** in the Ad Pulse three-role orchestration hierarchy. See root [AGENTS.md](../AGENTS.md) and [architecture-design.md](../architecture-design.md).
+This repository is assigned to the **Frontend Sub-Agent (Role C)** (`prebid-developer`). See the workspace hub [../AGENTS.md](../AGENTS.md).
 
-## LightRAG Context
+## Position in the system
 
-- Search Collection: `prebid-js_voyage_code_3`
-- **Always query LightRAG before generating code** to understand existing custom modules, bidder adapters, and Prebid.js fork conventions.
+- **Role:** the AdPulse fork of upstream Prebid.js (`adpulsebr/Prebid.js`, based on 10.x) producing header-bidding bundles under the `adppbjs` global. It never talks to fastlane-flask or api-nestjs itself.
+- **Downstream (consumer):** `adp-publisher-tag` loads `https://tag.adpulse.com.br/prebid.js` before the main tag (`adp-<tagId>.js`), initialises `window.adppbjs = window.adppbjs || { que: [] }`, and drives it via `adppbjs.que` from `managers/prebid-manager.js` and `strategies/auction-strategy.js` (GPT-only / Prebid+GPT / Prebid-only). Config comes from `ADP_PREBID_*` keys baked in by `api-nestjs` (`inventory/tag/tag.service.ts`): enabled, timeout, fail-safe timeout, price granularity, min floor, user sync.
+- **Upstream:** SSP/bidder endpoints (OneTag, Rubicon, Seedtag) and upstream `prebid/Prebid.js` (merge carefully).
+- **Delivery:** S3 + Cloudflare (`tag.adpulse.com.br`); see "AdPulse bundles".
+- **Contracts that must not break:** global name `adppbjs` and its `que`/`processQueue` behaviour; public URLs `prebid.js`, `prebid-no-user-sync.js`, `prebid-adzep.js`; bundled bidder codes; the `ADP_PREBID_*` config semantics (timeouts, granularity, floor, user sync). Changing any of these requires coordinated changes in `adp-publisher-tag` and `api-nestjs`. Hub: [../AGENTS.md](../AGENTS.md).
+
+## LightRAG-first workflow (mandatory)
+
+Always query LightRAG **before writing code or a plan** in this repo. Tools: `mcp__lightrag-mcp__query` (synthesized answer; modes `mix`/`local`/`global`/`hybrid`/`naive`) and `mcp__lightrag-mcp__query_context` (raw chunks + file paths); in Claude Code load them with `ToolSearch` `select:mcp__lightrag-mcp__query,mcp__lightrag-mcp__query_context`. There is ONE workspace (`adpulse`), not per-repo collections: always put `Prebid.js` (or the neighbour repo) in the query, since ids look like `repo::path`. Reranking currently fails server-side, so rankings are noisy — verify against source.
+
+1. **Entity lookup** — exact module/function names plus intent:
+   - `"rubiconBidAdapter buildRequests Prebid.js"`
+   - `"adppbjs globalVarName prebidGlobal Prebid.js"`
+   - `"modules-adzep.json bundle prebid-adzep Prebid.js"`
+2. **Dependency map** — when the global, bundle URLs, bundled modules or bid/config shape change, search consumers:
+   - `"adppbjs que prebid-manager adp-publisher-tag"`
+   - `"ADP_PREBID_ tag.service api-nestjs"`
+   - `"prebid.js header bidding TagModal app-react"`
+3. **Rule verification** — before adding a file, module or import:
+   - `"constraints OR rules OR conventions Prebid.js"`
+   - `"AGENTS.md skills.md conventions Prebid.js"`
+   - and read this file, `SKILLS.md`, `CONTRIBUTING.md`, `PR_REVIEW.md`.
+
+If a query returns `[no-context]` (or "not able to provide an answer"), nothing relevant is indexed: fall back to Grep/Read and say so. When LightRAG and source disagree, source wins. Note: LightRAG currently has little about this repo's build/deploy; trust the workflow files.
 
 ## Skills & Capabilities
 
